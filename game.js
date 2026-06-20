@@ -22,8 +22,16 @@ function roomCodeGen(){
   return s;
 }
 
-let myPlayerId = sessionStorage.getItem('dd_playerId') || uid();
-sessionStorage.setItem('dd_playerId', myPlayerId);
+// IMPORTANT: this used to be sessionStorage, which mobile browsers
+// (especially iOS Safari) frequently wipe when a backgrounded tab gets
+// reloaded to save memory. When that happened mid-game, the player would
+// silently get a brand-new random ID — which no longer matched the ID
+// Firebase had recorded for them in turnOrder/players, so the app could
+// never recognize them as "the drawer" again even on their own turn.
+// localStorage persists across reloads/backgrounding, so identity now
+// survives for the lifetime of the browser (until cleared manually).
+let myPlayerId = localStorage.getItem('dd_playerId') || uid();
+localStorage.setItem('dd_playerId', myPlayerId);
 
 let myRoomCode = null;
 let myName = '';
@@ -31,6 +39,7 @@ let isHost = false;
 let roomRef = null;
 let listeners = [];
 let localTimerInterval = null;
+let rejoinAttempted = false;
 
 let roomState = null; // last known snapshot of /rooms/{code}
 let chatRenderedKeys = new Set();
@@ -91,6 +100,7 @@ document.getElementById('create-room-btn').addEventListener('click', async () =>
   });
 
   enterLobby();
+  rememberRoom();
 });
 
 document.getElementById('join-room-btn').addEventListener('click', async () => {
@@ -116,10 +126,11 @@ document.getElementById('join-room-btn').addEventListener('click', async () => {
   });
 
   enterLobby();
+  rememberRoom();
 });
 
 /* Allow joining directly via ?room=CODE in URL */
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
   if(room){
@@ -128,7 +139,37 @@ window.addEventListener('DOMContentLoaded', () => {
     document.querySelector('.or-divider').style.display = 'none';
   }
   initConnectionWatcher();
+
+  // Auto-rejoin: if this device was already a player in a room (e.g. the
+  // tab got reloaded mid-game by the mobile OS), reconnect automatically
+  // instead of dropping them back to a blank name/join screen — which
+  // previously meant a backgrounded-then-restored phone would silently
+  // sit out the rest of the game even though its player ID was still
+  // valid in turnOrder.
+  const remembered = JSON.parse(localStorage.getItem('dd_lastRoom') || 'null');
+  if(remembered && remembered.roomCode && typeof db !== 'undefined' && !rejoinAttempted){
+    rejoinAttempted = true;
+    try{
+      const snap = await db.ref('rooms/' + remembered.roomCode + '/players/' + myPlayerId).once('value');
+      if(snap.exists()){
+        myRoomCode = remembered.roomCode;
+        myName = snap.val().name || remembered.name || '';
+        isHost = remembered.isHost === true;
+        roomRef = db.ref('rooms/' + myRoomCode);
+        // Re-verify host status against the live room, in case it changed.
+        const hostSnap = await roomRef.child('hostId').once('value');
+        isHost = hostSnap.val() === myPlayerId;
+        enterLobby();
+      }
+    } catch(e){
+      // Room may no longer exist — fall through to normal landing screen.
+    }
+  }
 });
+
+function rememberRoom(){
+  localStorage.setItem('dd_lastRoom', JSON.stringify({ roomCode: myRoomCode, name: myName, isHost }));
+}
 
 /* ---------------------- Lobby ---------------------- */
 function enterLobby(){
