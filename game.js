@@ -164,12 +164,17 @@ document.getElementById('start-game-btn').addEventListener('click', async () => 
     drawtime: parseInt(document.getElementById('opt-drawtime').value, 10),
     rounds: parseInt(document.getElementById('opt-rounds').value, 10),
     mode: document.getElementById('opt-mode').value,
+    drawMode: document.getElementById('opt-drawmode').value, // 'everyone' | 'host_only'
     wordcount: parseInt(document.getElementById('opt-wordcount').value, 10),
     hints: parseInt(document.getElementById('opt-hints').value, 10),
     bank: document.getElementById('opt-bank').value
   };
 
-  // shuffle turn order
+  // turnOrder is always the full shuffled player list — used for round-wrap
+  // math and "how many non-drawers must guess" counts. Who actually draws
+  // each turn is resolved separately by currentDrawerId(), which checks
+  // settings.drawMode: in "host_only" mode every turn's drawer is just the
+  // host, regardless of whose "turn" it nominally is in this list.
   const order = [...ids];
   for(let i=order.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
 
@@ -267,6 +272,7 @@ function renderSettingsSummary(){
     <div>🔁 ${s.rounds} rounds</div>
     <div>🎮 ${s.mode}</div>
     <div>❓ ${s.hints} hints</div>
+    <div>✏️ ${s.drawMode === 'host_only' ? 'Host draws all turns' : 'Everyone takes turns'}</div>
   `;
 }
 
@@ -280,33 +286,53 @@ let brushSize = 6;
 let tool = 'pen';
 let currentStrokePoints = [];
 
+// Fixed internal drawing resolution — decoupled from on-screen CSS size.
+// This is the key fix for strokes disappearing/not syncing on laptops:
+// the canvas bitmap is now sized ONCE and never reset by a window resize
+// (resizing canvas.width/height always wipes the bitmap, which was
+// silently erasing strokes whenever a laptop browser fired a resize
+// event after page load — scrollbars, devtools, font-load reflow, etc).
+// We keep the canvas's *internal* pixel grid fixed at CANVAS_W x CANVAS_H
+// and let CSS scale it visually; all stroke coordinates are normalized
+// 0–1 against this fixed grid so every device — laptop or phone, any
+// aspect ratio — draws and replays strokes at the exact same relative
+// position.
+const CANVAS_W = 1000;
+const CANVAS_H = 625; // matches the 16:10 aspect-ratio set in CSS
+
 function fitCanvas(){
-  const rect = canvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
-  const prevImg = canvas.width > 0 ? ctx.getImageData(0,0,canvas.width,canvas.height) : null;
-  canvas.width = Math.max(1, Math.round(rect.width * ratio));
-  canvas.height = Math.max(1, Math.round(rect.height * ratio));
-  ctx.setTransform(ratio,0,0,ratio,0,0);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0,0,rect.width,rect.height);
+  if(canvas.width !== CANVAS_W * ratio || canvas.height !== CANVAS_H * ratio){
+    // Only happens once (or if devicePixelRatio itself changes, e.g. dragging
+    // a window between a normal and a Retina display) — never on a plain resize.
+    canvas.width = CANVAS_W * ratio;
+    canvas.height = CANVAS_H * ratio;
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+  }
 }
-window.addEventListener('resize', fitCanvas);
+window.addEventListener('resize', fitCanvas); // safe no-op now unless DPR changed
 window.addEventListener('load', () => setTimeout(fitCanvas, 60));
 setTimeout(fitCanvas, 200);
 
 function isMyTurnToDraw(){
-  return roomState && roomState.turnOrder && roomState.turnOrder[roomState.turnIndex % roomState.turnOrder.length] === myPlayerId
-    && (roomState.status === 'drawing');
+  if(!roomState || roomState.status !== 'drawing') return false;
+  return currentDrawerId() === myPlayerId;
 }
 
+// Maps a real pointer/touch event to a position on the FIXED canvas grid
+// (CANVAS_W x CANVAS_H), regardless of how big the canvas is drawn on screen.
 function getPos(e){
   const rect = canvas.getBoundingClientRect();
   let clientX, clientY;
   if(e.touches && e.touches.length){ clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
   else { clientX = e.clientX; clientY = e.clientY; }
-  return { x: clientX - rect.left, y: clientY - rect.top };
+  const xRatio = (clientX - rect.left) / rect.width;
+  const yRatio = (clientY - rect.top) / rect.height;
+  return { x: xRatio * CANVAS_W, y: yRatio * CANVAS_H };
 }
 
 function localStroke(p1, p2, color, size, toolType){
@@ -329,11 +355,11 @@ function moveDraw(e){
   e.preventDefault();
   const p = getPos(e);
   localStroke(lastPoint, p, brushColor, brushSize, tool);
-  // push to firebase (normalized 0-1 coords so all screen sizes match)
-  const rect = canvas.getBoundingClientRect();
+  // push to firebase as fractions of the FIXED canvas grid (0-1), so every
+  // device — any screen size, any aspect ratio — replays at the same spot.
   roomRef.child('strokes').push({
-    x1: lastPoint.x/rect.width, y1: lastPoint.y/rect.height,
-    x2: p.x/rect.width, y2: p.y/rect.height,
+    x1: lastPoint.x/CANVAS_W, y1: lastPoint.y/CANVAS_H,
+    x2: p.x/CANVAS_W, y2: p.y/CANVAS_H,
     color: brushColor, size: brushSize, tool: tool
   });
   lastPoint = p;
@@ -348,20 +374,18 @@ canvas.addEventListener('touchmove', moveDraw, {passive:false});
 canvas.addEventListener('touchend', endDraw);
 
 function drawStrokeSegment(s){
-  const rect = canvas.getBoundingClientRect();
   localStroke(
-    {x: s.x1*rect.width, y: s.y1*rect.height},
-    {x: s.x2*rect.width, y: s.y2*rect.height},
+    {x: s.x1*CANVAS_W, y: s.y1*CANVAS_H},
+    {x: s.x2*CANVAS_W, y: s.y2*CANVAS_H},
     s.color, s.size, s.tool
   );
 }
 
 function clearCanvasLocal(){
-  const rect = canvas.getBoundingClientRect();
   ctx.save();
   ctx.setTransform(window.devicePixelRatio||1,0,0,window.devicePixelRatio||1,0,0);
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0,0,rect.width,rect.height);
+  ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
   ctx.restore();
 }
 
@@ -408,6 +432,9 @@ document.getElementById('brushSize').addEventListener('input', (e) => { brushSiz
 /* ---------------------- Turn flow (host-authoritative) ---------------------- */
 function currentDrawerId(){
   if(!roomState || !roomState.turnOrder || !roomState.turnOrder.length) return null;
+  if(roomState.settings && roomState.settings.drawMode === 'host_only'){
+    return roomState.hostId;
+  }
   return roomState.turnOrder[roomState.turnIndex % roomState.turnOrder.length];
 }
 
@@ -640,7 +667,9 @@ async function scorePendingGuesses(){
   const snap = await roomRef.once('value');
   const room = snap.val();
   if(!room || room.status !== 'drawing') return;
-  const drawerId = room.turnOrder[room.turnIndex % room.turnOrder.length];
+  const drawerId = (room.settings && room.settings.drawMode === 'host_only')
+    ? room.hostId
+    : room.turnOrder[room.turnIndex % room.turnOrder.length];
   const guesses = room.guesses || {};
   const gains = room.turnScoreGains || {};
 
