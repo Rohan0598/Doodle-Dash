@@ -108,6 +108,16 @@
     background:var(--paper); color:var(--ink); border:2px solid var(--ink); border-radius:8px; padding:6px 10px; font-size:15px; min-width:110px; text-align:right;
   }
   .waiting-msg{ text-align:center; opacity:.7; font-size:15px; margin-top:10px;}
+  .leave-link{
+    display:block; width:100%; text-align:center; background:none; border:none;
+    color:#bbb; font-size:14px; margin-top:16px; padding:8px; text-decoration:underline;
+  }
+  .leave-link:hover{ color:#fff; }
+  .topbar-leave{
+    width:auto; margin:0; padding:6px 10px; text-decoration:none; font-size:18px;
+    background:var(--charcoal-2); border-radius:8px; color:var(--paper); flex-shrink:0;
+  }
+  .topbar-leave:hover{ background:var(--red); color:white; }
 
   /* ---------- Game Screen ---------- */
   #game-screen{ flex-direction:column; width:100%; min-height:100vh; }
@@ -303,12 +313,14 @@
     </div>
     <div class="settings-summary" id="settings-summary-view" style="display:none;"></div>
     <div class="waiting-msg" id="waiting-msg">Waiting for the host to start the game…</div>
+    <button class="leave-link" id="leave-room-lobby-btn">← Leave room / go home</button>
   </div>
 </div>
 
 <!-- ============ GAME SCREEN ============ -->
 <div id="game-screen" class="screen">
   <div class="topbar">
+    <button class="leave-link topbar-leave" id="leave-room-game-btn" title="Leave game">✕</button>
     <div class="round-pill" id="round-indicator">Round 1 / 3</div>
     <div class="timer-wrap"><div class="timer-circle" id="timer-circle">80</div></div>
     <div class="word-blanks" id="word-blanks">_ _ _ _</div>

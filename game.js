@@ -132,9 +132,9 @@ document.getElementById('join-room-btn').addEventListener('click', async () => {
 /* Allow joining directly via ?room=CODE in URL */
 window.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
-  const room = params.get('room');
-  if(room){
-    document.getElementById('join-code-input').value = room.toUpperCase();
+  const linkedRoom = params.get('room') ? params.get('room').toUpperCase() : null;
+  if(linkedRoom){
+    document.getElementById('join-code-input').value = linkedRoom;
     document.getElementById('create-block').style.display = 'none';
     document.querySelector('.or-divider').style.display = 'none';
   }
@@ -142,12 +142,20 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Auto-rejoin: if this device was already a player in a room (e.g. the
   // tab got reloaded mid-game by the mobile OS), reconnect automatically
-  // instead of dropping them back to a blank name/join screen — which
-  // previously meant a backgrounded-then-restored phone would silently
-  // sit out the rest of the game even though its player ID was still
-  // valid in turnOrder.
+  // instead of dropping them back to a blank name/join screen.
+  //
+  // IMPORTANT: this must NEVER override an explicit ?room=CODE link in the
+  // URL. Previously, auto-rejoin ran unconditionally on every page load —
+  // so clicking a brand-new invite link while localStorage still
+  // remembered an older room silently reconnected you to the OLD room
+  // instead, which looked like "the link doesn't work" / "stuck on an old
+  // game with no way back to home." Now: if the URL names a *different*
+  // room than the one we remember, we skip auto-rejoin entirely and let
+  // the person consciously join the room they actually clicked into.
   const remembered = JSON.parse(localStorage.getItem('dd_lastRoom') || 'null');
-  if(remembered && remembered.roomCode && typeof db !== 'undefined' && !rejoinAttempted){
+  const linkPointsElsewhere = linkedRoom && remembered && remembered.roomCode && linkedRoom !== remembered.roomCode;
+
+  if(remembered && remembered.roomCode && typeof db !== 'undefined' && !rejoinAttempted && !linkPointsElsewhere){
     rejoinAttempted = true;
     try{
       const snap = await db.ref('rooms/' + remembered.roomCode + '/players/' + myPlayerId).once('value');
@@ -170,6 +178,49 @@ window.addEventListener('DOMContentLoaded', async () => {
 function rememberRoom(){
   localStorage.setItem('dd_lastRoom', JSON.stringify({ roomCode: myRoomCode, name: myName, isHost }));
 }
+
+// Fully detach from the current room and return to the landing screen.
+// This is the fix for "impossible to go back to home without clearing
+// cookies" — previously there was no way to exit a room at all once
+// you'd joined one, and the remembered room in localStorage would keep
+// silently reconnecting you to it on every future page load.
+function leaveRoom(){
+  if(roomRef){
+    roomRef.off();
+    roomRef.child('chat').off();
+    roomRef.child('strokes').off();
+    roomRef.child('clearSignal').off();
+    roomRef.child('guesses').off();
+  }
+  clearInterval(localTimerInterval);
+  localTimerInterval = null;
+  nonHostTickerStarted = false;
+  roomState = null;
+  roomRef = null;
+  myRoomCode = null;
+  isHost = false;
+  chatRenderedKeys.clear();
+  strokeRenderedKeys.clear();
+  localStorage.removeItem('dd_lastRoom');
+
+  // Clean the ?room= param out of the URL so reloading doesn't re-trigger
+  // the join flow, and reset the landing form back to its default state.
+  if(window.history && window.history.replaceState){
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+  document.getElementById('create-block').style.display = 'block';
+  document.querySelector('.or-divider').style.display = 'block';
+  document.getElementById('join-code-input').value = '';
+
+  goScreen('landing-screen');
+}
+
+document.getElementById('leave-room-lobby-btn').addEventListener('click', leaveRoom);
+document.getElementById('leave-room-game-btn').addEventListener('click', () => {
+  if(confirm('Leave this game and go back to the home screen?')){
+    leaveRoom();
+  }
+});
 
 /* ---------------------- Lobby ---------------------- */
 function enterLobby(){
@@ -489,11 +540,20 @@ function pickWordOptions(settings){
   return chosen;
 }
 
-async function beginTurnAsHost(){
+async function beginTurnAsHost(extraUpdates){
   if(!isHost) return;
   const settings = roomState.settings;
   const options = pickWordOptions(settings);
+  // IMPORTANT: turnIndex/round (when advancing to a new turn) are merged
+  // into this SAME update() call as status/wordOptions/etc — previously
+  // these were two separate writes (advance turn, then begin turn), which
+  // meant every client's listener could fire in between them and briefly
+  // see "new drawer, but status still = drawing from the old turn" — that
+  // window let the incoming drawer's canvas unlock a beat early, looking
+  // like two people could draw at once. A single atomic update means
+  // clients only ever see one complete, consistent turn state.
   await roomRef.update({
+    ...(extraUpdates || {}),
     status: 'choosing',
     wordOptions: options,
     currentWord: null,
@@ -807,8 +867,7 @@ document.getElementById('next-turn-btn').addEventListener('click', async () => {
   if(nextRound > roomState.settings.rounds){
     await roomRef.update({ status: 'final' });
   } else {
-    await roomRef.update({ turnIndex: nextIndex, round: nextRound });
-    await beginTurnAsHost();
+    await beginTurnAsHost({ turnIndex: nextIndex, round: nextRound });
   }
 });
 
