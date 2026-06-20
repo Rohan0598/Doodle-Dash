@@ -235,11 +235,29 @@
     padding:10px; font-size:15px; z-index:100; display:none;
   }
   .error-banner.show{ display:block; }
+
+  .rejoin-banner{
+    position:fixed; top:0; left:0; right:0; background:var(--charcoal); color:var(--paper);
+    text-align:center; padding:14px 16px; font-size:15px; z-index:101; display:none;
+    box-shadow:0 4px 14px rgba(0,0,0,0.3); align-items:center; justify-content:center; gap:12px; flex-wrap:wrap;
+  }
+  .rejoin-banner.show{ display:flex; }
+  .rejoin-banner b{ color:var(--yellow); }
+  .rejoin-banner button{
+    border:none; border-radius:8px; padding:7px 16px; font-size:14px; font-weight:bold; font-family:'Patrick Hand',sans-serif;
+  }
+  .rejoin-banner .yes-btn{ background:var(--teal); color:var(--ink); }
+  .rejoin-banner .no-btn{ background:var(--charcoal-2); color:var(--paper); }
 </style>
 </head>
 <body>
 
 <div class="error-banner" id="error-banner"></div>
+<div class="rejoin-banner" id="rejoin-banner">
+  <span>You were in room <b id="rejoin-room-code">ABCD</b> — rejoin?</span>
+  <button class="yes-btn" id="rejoin-yes-btn">Rejoin</button>
+  <button class="no-btn" id="rejoin-no-btn">No, go home</button>
+</div>
 
 <!-- ============ LANDING SCREEN ============ -->
 <div id="landing-screen" class="screen active">
@@ -306,7 +324,7 @@
           <select id="opt-hints"><option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
         </div>
         <div class="field"><label>📚 Word bank</label>
-          <select id="opt-bank"><option value="general" selected>General</option><option value="animals">Animals</option><option value="food">Food</option><option value="movies">Movies & TV</option></select>
+          <select id="opt-bank"><option value="general" selected>General</option><option value="animals">Animals</option><option value="food">Food</option><option value="movies">Movies & TV</option><option value="monuments">Monuments & Landmarks</option></select>
         </div>
       </div>
       <button class="big-btn red" id="start-game-btn" style="margin-top:14px;">▶ Start Game</button>

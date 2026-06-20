@@ -3,10 +3,11 @@
    =================================================================== */
 
 const WORD_BANKS = {
-  general: ["sunflower","umbrella","castle","robot","bicycle","volcano","spaceship","guitar","penguin","sandwich","rainbow","dragon","ladder","mountain","octopus","balloon","skateboard","lighthouse","cactus","snowman","pirate","windmill","jellyfish","telescope","waterfall"],
-  animals: ["elephant","kangaroo","flamingo","octopus","penguin","giraffe","hedgehog","platypus","chameleon","walrus","peacock","raccoon","otter","koala","narwhal"],
-  food: ["pizza","sushi","pancake","watermelon","taco","popcorn","cupcake","spaghetti","croissant","burrito","donut","pretzel","lemonade","waffle","noodles"],
-  movies: ["superhero","robot","dinosaur","spaceship","wizard","ghost","zombie","time machine","treasure map","alien invasion"]
+  general: ["sunflower","umbrella","castle","robot","bicycle","volcano","spaceship","guitar","penguin","sandwich","rainbow","dragon","ladder","mountain","octopus","balloon","skateboard","lighthouse","cactus","snowman","pirate","windmill","jellyfish","telescope","waterfall","airplane","anchor","backpack","bathtub","beehive","binoculars","blanket","bonfire","bridge","broom","bubble","camera","candle","canoe","carousel","caterpillar","chandelier","chess board","clock","cloud","compass","crown","drum","earthquake","easel","escalator","fan","feather","fence","fireworks","flashlight","fountain","fishbowl","glasses","globe","hammock","handshake","hourglass","igloo","kite","knight","lantern","lawnmower","magnet","map","maze","microscope","mirror","mitten","mushroom","necklace","nest","origami","paintbrush","parachute","passport","piano","pillow","pinwheel","pretzel","puzzle","quill","raft","rocket","rollercoaster","saddle","sailboat","scarecrow","scissors","seesaw","shipwreck","skeleton","sled","snorkel","snowflake","spider web","staircase","stethoscope","suitcase","sundial","surfboard","swing set","teapot","tent","throne","tightrope","toolbox","tornado","traffic light","treehouse","tricycle","trophy","tuba","typewriter","unicycle","vacuum","violin","wagon","wheelbarrow","whistle","wizard hat","xylophone","yoyo","zeppelin"],
+  animals: ["elephant","kangaroo","flamingo","octopus","penguin","giraffe","hedgehog","platypus","chameleon","walrus","peacock","raccoon","otter","koala","narwhal","alpaca","anteater","armadillo","baboon","badger","bat","beaver","bison","camel","cheetah","chimpanzee","cobra","cricket","crocodile","deer","dolphin","eagle","falcon","ferret","firefly","fox","gazelle","gecko","gorilla","hawk","hippopotamus","hyena","iguana","jaguar","jellyfish","ladybug","lemur","leopard","lobster","mole","mongoose","moose","ostrich","owl","panda","pangolin","parrot","pelican","porcupine","puffin","rabbit","rhinoceros","scorpion","seahorse","seal","shark","skunk","sloth","snail","squid","squirrel","starfish","stingray","swan","tiger","toucan","turtle","vulture","wolf","wombat","zebra"],
+  food: ["pizza","sushi","pancake","watermelon","taco","popcorn","cupcake","spaghetti","croissant","burrito","donut","pretzel","lemonade","waffle","noodles","avocado","bagel","baguette","banana split","barbecue","biryani","biscuit","brownie","burger","cake","candy cane","cereal","cheese","cheesecake","chili","chocolate bar","churro","coconut","cookie","corn on the cob","crepe","curry","dumpling","eclair","fish and chips","fortune cookie","french fries","fried egg","fruit salad","gingerbread man","grapes","guacamole","honey","hot dog","hummus","ice cream cone","jam","ketchup","kiwi","lasagna","lollipop","macaroni","mango","meatball","milkshake","muffin","nachos","omelette","onion rings","oyster","pancetta","pasta","peanut butter","pie","pineapple","popsicle","pumpkin pie","quesadilla","ramen","ravioli","salad","salsa","sandwich","sausage","smoothie","soup","spring roll","strawberry","sundae","sushi roll","tea","toast","tomato","watermelon slice"],
+  movies: ["superhero","robot","dinosaur","spaceship","wizard","ghost","zombie","time machine","treasure map","alien invasion","car chase","detective","explosion","haunted house","jungle expedition","magic spell","martial arts fight","pirate ship","robot uprising","secret agent","shipwreck","sword fight","talking animal","underwater city","villain lair","western showdown"],
+  monuments: ["Eiffel Tower","Statue of Liberty","Taj Mahal","Great Wall of China","Pyramids of Giza","Colosseum","Big Ben","Leaning Tower of Pisa","Sydney Opera House","Christ the Redeemer","Machu Picchu","Stonehenge","Mount Rushmore","Golden Gate Bridge","Burj Khalifa","Sagrada Familia","Brandenburg Gate","Acropolis","Angkor Wat","Petra","Niagara Falls","Mount Fuji","Tower Bridge","Hollywood Sign","Empire State Building","Notre Dame","Buckingham Palace","Red Fort","India Gate","Charminar","Gateway of India","Hawa Mahal","Lotus Temple","Konark Sun Temple","Victoria Memorial"]
 };
 const PLAYER_COLORS = ["#FF5C5C","#3FBFB4","#FFB627","#9B7EDE","#5FB85A","#FF8FB1","#5DA9E9","#E08D45"];
 
@@ -39,7 +40,6 @@ let isHost = false;
 let roomRef = null;
 let listeners = [];
 let localTimerInterval = null;
-let rejoinAttempted = false;
 
 let roomState = null; // last known snapshot of /rooms/{code}
 let chatRenderedKeys = new Set();
@@ -140,40 +140,66 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   initConnectionWatcher();
 
-  // Auto-rejoin: if this device was already a player in a room (e.g. the
-  // tab got reloaded mid-game by the mobile OS), reconnect automatically
-  // instead of dropping them back to a blank name/join screen.
+  // Rejoin handling: if this device was already a player in a room (e.g.
+  // the tab got reloaded mid-game by the mobile OS), we used to silently
+  // reconnect automatically. That caused a real problem: there was no way
+  // to tell "the OS reloaded my tab, please restore my game" apart from
+  // "I manually cleared the URL because I want to go home" — both look
+  // identical (a fresh page load with no ?room= param and a remembered
+  // room in storage). Silently rejoining made the second case impossible:
+  // editing the URL down to the bare domain just bounced you right back
+  // into the same room every time.
   //
-  // IMPORTANT: this must NEVER override an explicit ?room=CODE link in the
-  // URL. Previously, auto-rejoin ran unconditionally on every page load —
-  // so clicking a brand-new invite link while localStorage still
-  // remembered an older room silently reconnected you to the OLD room
-  // instead, which looked like "the link doesn't work" / "stuck on an old
-  // game with no way back to home." Now: if the URL names a *different*
-  // room than the one we remember, we skip auto-rejoin entirely and let
-  // the person consciously join the room they actually clicked into.
+  // Fix: never rejoin silently. If there's a remembered room, show a small
+  // dismissible prompt and let the person choose. An explicit ?room=CODE
+  // link in the URL still always wins and skips the prompt entirely, since
+  // clicking a fresh invite is itself a clear, unambiguous choice.
   const remembered = JSON.parse(localStorage.getItem('dd_lastRoom') || 'null');
   const linkPointsElsewhere = linkedRoom && remembered && remembered.roomCode && linkedRoom !== remembered.roomCode;
 
-  if(remembered && remembered.roomCode && typeof db !== 'undefined' && !rejoinAttempted && !linkPointsElsewhere){
-    rejoinAttempted = true;
-    try{
-      const snap = await db.ref('rooms/' + remembered.roomCode + '/players/' + myPlayerId).once('value');
-      if(snap.exists()){
-        myRoomCode = remembered.roomCode;
-        myName = snap.val().name || remembered.name || '';
-        isHost = remembered.isHost === true;
-        roomRef = db.ref('rooms/' + myRoomCode);
-        // Re-verify host status against the live room, in case it changed.
-        const hostSnap = await roomRef.child('hostId').once('value');
-        isHost = hostSnap.val() === myPlayerId;
-        enterLobby();
-      }
-    } catch(e){
-      // Room may no longer exist — fall through to normal landing screen.
-    }
+  if(linkedRoom && !linkPointsElsewhere && remembered && remembered.roomCode === linkedRoom){
+    // The link matches the room we already remember — just go straight in,
+    // no need to prompt since the URL itself is the explicit choice.
+    await attemptRejoin(remembered);
+  } else if(remembered && remembered.roomCode && !linkedRoom && typeof db !== 'undefined'){
+    showRejoinPrompt(remembered);
   }
 });
+
+async function attemptRejoin(remembered){
+  if(typeof db === 'undefined') return false;
+  try{
+    const snap = await db.ref('rooms/' + remembered.roomCode + '/players/' + myPlayerId).once('value');
+    if(snap.exists()){
+      myRoomCode = remembered.roomCode;
+      myName = snap.val().name || remembered.name || '';
+      isHost = remembered.isHost === true;
+      roomRef = db.ref('rooms/' + myRoomCode);
+      const hostSnap = await roomRef.child('hostId').once('value');
+      isHost = hostSnap.val() === myPlayerId;
+      enterLobby();
+      return true;
+    }
+  } catch(e){ /* room may no longer exist */ }
+  // Stale/invalid — clean it up so we don't keep prompting for a dead room.
+  localStorage.removeItem('dd_lastRoom');
+  return false;
+}
+
+function showRejoinPrompt(remembered){
+  const banner = document.getElementById('rejoin-banner');
+  document.getElementById('rejoin-room-code').textContent = remembered.roomCode;
+  banner.classList.add('show');
+  document.getElementById('rejoin-yes-btn').onclick = async () => {
+    banner.classList.remove('show');
+    const ok = await attemptRejoin(remembered);
+    if(!ok) showError('That game is no longer available.');
+  };
+  document.getElementById('rejoin-no-btn').onclick = () => {
+    banner.classList.remove('show');
+    localStorage.removeItem('dd_lastRoom');
+  };
+}
 
 function rememberRoom(){
   localStorage.setItem('dd_lastRoom', JSON.stringify({ roomCode: myRoomCode, name: myName, isHost }));
@@ -270,10 +296,12 @@ document.getElementById('start-game-btn').addEventListener('click', async () => 
   const order = [...ids];
   for(let i=order.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
 
-  await roomRef.update({
-    settings, turnOrder: order, round: 1, turnIndex: 0, status: 'choosing'
-  });
-  await beginTurnAsHost();
+  // Same atomic-write fix as the "next turn" flow: settings/turnOrder/round/
+  // turnIndex are passed into beginTurnAsHost's single update() call instead
+  // of being written separately beforehand. Two separate writes here meant
+  // clients could briefly observe status:'choosing' with stale/empty
+  // wordOptions from before beginTurnAsHost's write landed.
+  await beginTurnAsHost({ settings, turnOrder: order, round: 1, turnIndex: 0 });
 });
 
 /* ---------------------- Room listener (all clients) ---------------------- */
@@ -542,7 +570,12 @@ function pickWordOptions(settings){
 
 async function beginTurnAsHost(extraUpdates){
   if(!isHost) return;
-  const settings = roomState.settings;
+  // Prefer the settings being written in this same update (e.g. when the
+  // host just clicked Start Game) over the locally cached roomState.settings,
+  // which may still reflect the lobby's old defaults until Firebase's
+  // listener round-trip catches up — using the stale value here could pick
+  // words from the wrong word bank for the very first turn.
+  const settings = (extraUpdates && extraUpdates.settings) || roomState.settings;
   const options = pickWordOptions(settings);
   // IMPORTANT: turnIndex/round (when advancing to a new turn) are merged
   // into this SAME update() call as status/wordOptions/etc — previously
@@ -585,6 +618,19 @@ function renderGameState(prevStatus){
   renderScoreboard();
 
   if(roomState.status === 'choosing'){
+    // A new turn just started. The canvas and word-blanks previously held
+    // whatever was drawn/shown last turn — strokes are only ever ADDED to
+    // the canvas (each arriving stroke segment is painted on top, nothing
+    // ever erases it locally), and word-blanks text was only updated while
+    // status === 'drawing'. So without this, every new turn silently kept
+    // showing the previous turn's finished drawing and word underneath the
+    // "picking a word..." overlay — exactly the stale-umbrella bug.
+    if(prevStatus !== 'choosing'){
+      clearCanvasLocal();
+      strokeRenderedKeys.clear();
+    }
+    document.getElementById('word-blanks').textContent = '';
+    document.getElementById('hint-row').textContent = '';
     handleChoosingPhase(amDrawer, drawerName);
   } else {
     document.getElementById('word-choice-overlay').classList.remove('active');
