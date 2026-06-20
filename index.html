@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doodle Dash — Draw & Guess Online</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FFFDF7;
+    --ink:#1A1A2E;
+    --charcoal:#2D2D44;
+    --charcoal-2:#23233a;
+    --red:#FF5C5C;
+    --teal:#3FBFB4;
+    --yellow:#FFB627;
+    --line:#E4DFCF;
+    --shadow: rgba(26,26,46,0.18);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Patrick Hand', sans-serif;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(26,26,46,0.05) 1px, transparent 0) 0 0/22px 22px,
+      var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+  }
+  h1,h2,h3,.display{ font-family:'Kalam', cursive; }
+  button{ font-family:'Patrick Hand', sans-serif; cursor:pointer; }
+  select, input{ font-family:'Patrick Hand', sans-serif; }
+
+  .screen{ display:none; min-height:100vh; }
+  .screen.active{ display:flex; }
+
+  /* ---------- Landing ---------- */
+  #landing-screen{
+    flex-direction:column; align-items:center; padding:50px 16px 60px;
+  }
+  .logo-wrap{ text-align:center; margin-bottom:10px; }
+  .logo-wrap h1{ font-size:60px; margin:0; position:relative; display:inline-block; }
+  .logo-wrap h1 .accent{ color:var(--red); }
+  .tagline{ font-size:19px; color:var(--charcoal); opacity:.75; }
+
+  .landing-card{
+    background:var(--charcoal); color:var(--paper); border-radius:18px;
+    max-width:480px; width:100%; margin-top:34px; padding:28px 30px;
+    box-shadow:0 12px 0 var(--shadow);
+  }
+  .landing-card h2{ margin:0 0 4px; font-size:24px; color:var(--yellow); }
+  .landing-card p{ font-size:15px; opacity:.8; margin:0 0 16px; line-height:1.4;}
+  .landing-card input[type=text]{
+    width:100%; padding:11px 14px; border-radius:10px; border:2px solid var(--ink);
+    font-size:18px; margin-bottom:12px; color:var(--ink);
+  }
+  .big-btn{
+    width:100%; padding:14px; font-size:21px; font-family:'Kalam',cursive; font-weight:700;
+    border:none; border-radius:10px; margin-top:4px;
+  }
+  .big-btn.red{ background:var(--red); color:white; box-shadow:0 5px 0 #c23f3f; }
+  .big-btn.teal{ background:var(--teal); color:var(--ink); box-shadow:0 5px 0 #2c9b92; }
+  .or-divider{ text-align:center; opacity:.6; margin:18px 0; font-size:14px; }
+  .conn-status{ font-size:13px; margin-top:14px; opacity:.75; display:flex; align-items:center; gap:6px;}
+  .dot{ width:9px; height:9px; border-radius:50%; background:#777; }
+  .dot.ok{ background:#5FB85A; }
+  .dot.err{ background:var(--red); }
+
+  /* ---------- Lobby ---------- */
+  #lobby-screen{ flex-direction:column; align-items:center; padding:40px 16px; }
+  .lobby-card{
+    background:var(--charcoal); color:var(--paper); border-radius:18px;
+    max-width:560px; width:100%; padding:28px 30px; box-shadow:0 12px 0 var(--shadow);
+  }
+  .room-code-display{
+    text-align:center; margin-bottom:18px;
+  }
+  .room-code-display .label{ font-size:14px; opacity:.7; }
+  .room-code-display .code{
+    font-family:'Kalam',cursive; font-size:42px; letter-spacing:6px; color:var(--yellow);
+  }
+  .share-link-box{
+    display:flex; gap:8px; margin-top:10px;
+  }
+  .share-link-box input{
+    flex:1; padding:9px 12px; border-radius:8px; border:2px solid var(--ink); font-size:14px; color:var(--ink);
+  }
+  .share-link-box button{
+    background:var(--teal); color:var(--ink); border:none; border-radius:8px; padding:9px 14px; font-weight:bold;
+  }
+  .lobby-players{ list-style:none; padding:0; margin:18px 0; display:flex; flex-direction:column; gap:8px;}
+  .lobby-players li{
+    background:var(--charcoal-2); padding:10px 14px; border-radius:8px; display:flex; align-items:center; gap:10px; font-size:18px;
+  }
+  .lobby-players .avatar{ width:28px;height:28px;border-radius:50%; display:flex;align-items:center;justify-content:center; font-family:'Kalam',cursive; font-size:14px;}
+  .host-tag{ margin-left:auto; font-size:12px; background:var(--yellow); color:var(--ink); padding:2px 8px; border-radius:10px;}
+  .settings-summary{
+    background:var(--charcoal-2); border-radius:10px; padding:12px 16px; font-size:15px; margin-bottom:16px;
+    display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;
+  }
+  .host-settings{ margin-top:6px; }
+  .field{
+    display:flex; align-items:center; justify-content:space-between; gap:14px; padding:7px 2px;
+    border-bottom:1px dashed rgba(255,253,247,0.18); font-size:17px;
+  }
+  .field select{
+    background:var(--paper); color:var(--ink); border:2px solid var(--ink); border-radius:8px; padding:6px 10px; font-size:15px; min-width:110px; text-align:right;
+  }
+  .waiting-msg{ text-align:center; opacity:.7; font-size:15px; margin-top:10px;}
+
+  /* ---------- Game Screen ---------- */
+  #game-screen{ flex-direction:column; width:100%; min-height:100vh; }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; padding:12px 22px;
+    background:var(--charcoal); color:var(--paper); gap:16px; flex-wrap:wrap;
+  }
+  .round-pill{ background:var(--charcoal-2); padding:6px 14px; border-radius:20px; font-size:16px; }
+  .timer-wrap{ display:flex; align-items:center; gap:10px; }
+  .timer-circle{
+    width:46px; height:46px; border-radius:50%; border:4px solid var(--yellow);
+    display:flex; align-items:center; justify-content:center; font-family:'Kalam',cursive; font-size:18px; font-weight:700;
+    transition:border-color .3s;
+  }
+  .word-blanks{ font-family:'Kalam', cursive; font-size:30px; letter-spacing:6px; flex:1; text-align:center; min-width:200px; }
+  .drawer-tag{ background:var(--teal); color:var(--ink); padding:6px 14px; border-radius:20px; font-size:16px; font-weight:bold; }
+
+  .game-body{ display:flex; flex:1; gap:16px; padding:16px 22px 22px; flex-wrap:wrap; }
+  .canvas-col{ flex:3; min-width:320px; display:flex; flex-direction:column; gap:10px; }
+  .canvas-frame{
+    background:white; border-radius:14px; border:3px solid var(--ink); box-shadow:0 8px 0 var(--shadow);
+    overflow:hidden; position:relative; width:100%; aspect-ratio:16/10;
+  }
+  #drawCanvas{ display:block; width:100%; height:100%; touch-action:none; cursor:crosshair; }
+  .canvas-blocked{
+    position:absolute; inset:0; background:rgba(255,255,255,0.55); display:none;
+    align-items:center; justify-content:center; font-size:20px; color:var(--charcoal); text-align:center; padding:20px;
+  }
+  .canvas-blocked.show{ display:flex; }
+
+  .toolbar{ display:flex; align-items:center; gap:10px; background:var(--charcoal); border-radius:12px; padding:10px 14px; flex-wrap:wrap; }
+  .toolbar.disabled{ opacity:.4; pointer-events:none; }
+  .swatches{ display:flex; gap:6px; }
+  .swatch{ width:26px; height:26px; border-radius:50%; border:2px solid rgba(255,255,255,0.5); cursor:pointer; }
+  .swatch.active{ border-color:var(--yellow); transform:scale(1.15); }
+  .tool-btn{ background:var(--charcoal-2); color:var(--paper); border:none; border-radius:8px; padding:7px 11px; font-size:15px; }
+  .tool-btn.active{ background:var(--teal); color:var(--ink); font-weight:bold; }
+  #brushSize{ width:80px; }
+  .spacer{ flex:1; }
+
+  .sidebar{ flex:1; min-width:230px; display:flex; flex-direction:column; gap:14px; }
+  .panel{ background:var(--charcoal); color:var(--paper); border-radius:14px; padding:14px 16px; box-shadow:0 6px 0 var(--shadow); }
+  .panel h3{ margin:0 0 10px; font-size:20px; color:var(--yellow); display:flex; align-items:center; gap:8px; }
+  .player-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;}
+  .player-list li{ display:flex; align-items:center; justify-content:space-between; background:var(--charcoal-2); padding:8px 12px; border-radius:8px; font-size:17px; }
+  .player-list li.drawing-now{ outline:2px solid var(--teal); }
+  .player-list li.guessed-it{ outline:1px solid var(--yellow); }
+  .player-list .pname{ display:flex; align-items:center; gap:8px; }
+  .player-list .avatar{ width:26px;height:26px;border-radius:50%; color:white; font-size:13px; display:flex;align-items:center;justify-content:center; font-family:'Kalam',cursive; }
+  .player-list .score{ color:var(--yellow); font-weight:bold; font-family:'Kalam',cursive; }
+
+  .chat-box{ height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:10px; padding-right:4px; }
+  .chat-line{ font-size:16px; line-height:1.3; }
+  .chat-line .who{ font-weight:bold; color:var(--teal); }
+  .chat-line.correct{ color:var(--yellow); font-weight:bold; }
+  .chat-line.system{ color:#aaa; font-style:italic; }
+  .chat-input-row{ display:flex; gap:8px; }
+  .chat-input-row input{ flex:1; border-radius:8px; border:none; padding:9px 10px; font-size:16px; }
+  .chat-input-row button{ background:var(--red); color:white; border:none; border-radius:8px; padding:9px 14px; font-weight:bold; }
+  .hint-row{ font-size:15px; opacity:.85; margin-top:6px; text-align:center;}
+
+  .overlay{
+    position:fixed; inset:0; background:rgba(26,26,46,0.78); display:none; align-items:center; justify-content:center;
+    z-index:50; flex-direction:column; gap:18px; text-align:center; padding:20px;
+  }
+  .overlay.active{ display:flex; }
+  .overlay h2{ color:white; font-size:28px; margin:0; }
+  .word-choices{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
+  .word-choice-btn{
+    background:var(--paper); border:3px solid var(--ink); border-radius:12px; padding:16px 26px;
+    font-family:'Kalam',cursive; font-size:24px; font-weight:700; box-shadow:0 5px 0 var(--shadow);
+  }
+  .word-choice-btn:hover{ background:var(--yellow); }
+  .pass-note{ color:#ccc; font-size:15px; }
+
+  .reveal-card{ background:var(--paper); border-radius:16px; padding:26px 30px; max-width:420px; width:100%; box-shadow:0 10px 0 rgba(0,0,0,0.3); }
+  .reveal-card h2{ margin-top:0; font-size:26px; }
+  .reveal-list{ list-style:none; padding:0; margin:14px 0 0; }
+  .reveal-list li{ display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px dashed var(--line); font-size:18px; }
+  .reveal-list li .gain{ color:var(--teal); font-weight:bold; }
+  .next-btn{
+    margin-top:18px; width:100%; padding:12px; font-size:20px; background:var(--teal); color:var(--ink); border:none;
+    border-radius:10px; font-family:'Kalam',cursive; font-weight:700; box-shadow:0 5px 0 #2c9b92;
+  }
+  .podium{ display:flex; align-items:flex-end; gap:14px; justify-content:center; margin:24px 0; }
+  .podium .place{ background:var(--charcoal-2); color:var(--paper); border-radius:10px 10px 0 0; padding:14px 16px; text-align:center; width:110px; }
+  .podium .place.first{ height:140px; background:var(--yellow); color:var(--ink); order:2; }
+  .podium .place.second{ height:105px; order:1; }
+  .podium .place.third{ height:80px; order:3; }
+  .podium .medal{ font-size:26px; }
+
+  .error-banner{
+    position:fixed; top:0; left:0; right:0; background:var(--red); color:white; text-align:center;
+    padding:10px; font-size:15px; z-index:100; display:none;
+  }
+  .error-banner.show{ display:block; }
+</style>
+</head>
+<body>
+
+<div class="error-banner" id="error-banner"></div>
+
+<!-- ============ LANDING SCREEN ============ -->
+<div id="landing-screen" class="screen active">
+  <div class="logo-wrap">
+    <h1>Doodle<span class="accent">Dash</span></h1>
+    <div class="tagline">draw it. guess it. score it. — with friends, anywhere.</div>
+  </div>
+
+  <div class="landing-card">
+    <h2>Your name</h2>
+    <input type="text" id="name-input" placeholder="e.g. Sam" maxlength="16">
+
+    <div id="create-block">
+      <h2 style="margin-top:18px;">Host a new game</h2>
+      <p>Create a room, then share the link or code with friends. They join from their own phone or computer.</p>
+      <button class="big-btn red" id="create-room-btn">🎨 Create Room</button>
+    </div>
+
+    <div class="or-divider">— or —</div>
+
+    <h2>Join a game</h2>
+    <p>Got a room code from a friend? Enter it below.</p>
+    <input type="text" id="join-code-input" placeholder="Room code e.g. ABCD" maxlength="6" style="text-transform:uppercase;">
+    <button class="big-btn teal" id="join-room-btn">🔗 Join Room</button>
+
+    <div class="conn-status" id="conn-status"><span class="dot" id="conn-dot"></span><span id="conn-text">Connecting to server…</span></div>
+  </div>
+</div>
+
+<!-- ============ LOBBY SCREEN ============ -->
+<div id="lobby-screen" class="screen">
+  <div class="lobby-card">
+    <div class="room-code-display">
+      <div class="label">Room code</div>
+      <div class="code" id="room-code-text">ABCD</div>
+      <div class="share-link-box">
+        <input type="text" id="share-link-input" readonly>
+        <button id="copy-link-btn">Copy</button>
+      </div>
+    </div>
+
+    <h3 style="margin:18px 0 8px;color:var(--yellow);">Players</h3>
+    <ul class="lobby-players" id="lobby-players"></ul>
+
+    <div id="host-settings-wrap" style="display:none;">
+      <h3 style="margin:18px 0 8px;color:var(--yellow);">Game settings (host only)</h3>
+      <div class="host-settings">
+        <div class="field"><label>⏱️ Draw time</label>
+          <select id="opt-drawtime"><option value="40">40s</option><option value="60">60s</option><option value="80" selected>80s</option><option value="100">100s</option><option value="120">120s</option></select>
+        </div>
+        <div class="field"><label>🔁 Rounds</label>
+          <select id="opt-rounds"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select>
+        </div>
+        <div class="field"><label>🎮 Mode</label>
+          <select id="opt-mode"><option value="normal" selected>Normal</option><option value="hidden">Hidden word</option><option value="speedrun">Speed round</option></select>
+        </div>
+        <div class="field"><label>🔤 Word count</label>
+          <select id="opt-wordcount"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select>
+        </div>
+        <div class="field"><label>❓ Hints</label>
+          <select id="opt-hints"><option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
+        </div>
+        <div class="field"><label>📚 Word bank</label>
+          <select id="opt-bank"><option value="general" selected>General</option><option value="animals">Animals</option><option value="food">Food</option><option value="movies">Movies & TV</option></select>
+        </div>
+      </div>
+      <button class="big-btn red" id="start-game-btn" style="margin-top:14px;">▶ Start Game</button>
+    </div>
+    <div class="settings-summary" id="settings-summary-view" style="display:none;"></div>
+    <div class="waiting-msg" id="waiting-msg">Waiting for the host to start the game…</div>
+  </div>
+</div>
+
+<!-- ============ GAME SCREEN ============ -->
+<div id="game-screen" class="screen">
+  <div class="topbar">
+    <div class="round-pill" id="round-indicator">Round 1 / 3</div>
+    <div class="timer-wrap"><div class="timer-circle" id="timer-circle">80</div></div>
+    <div class="word-blanks" id="word-blanks">_ _ _ _</div>
+    <div class="drawer-tag" id="drawer-tag">Alex is drawing</div>
+  </div>
+
+  <div class="game-body">
+    <div class="canvas-col">
+      <div class="canvas-frame">
+        <canvas id="drawCanvas" width="900" height="560"></canvas>
+        <div class="canvas-blocked" id="canvas-blocked">✋ Only the drawer can draw right now — guess in the chat!</div>
+      </div>
+      <div class="toolbar" id="toolbar">
+        <div class="swatches" id="swatches"></div>
+        <button class="tool-btn active" id="tool-pen">✏️ Pen</button>
+        <button class="tool-btn" id="tool-eraser">🧹 Eraser</button>
+        <label style="color:#fff;font-size:14px;display:flex;align-items:center;gap:6px;">Size <input type="range" id="brushSize" min="2" max="28" value="6"></label>
+        <div class="spacer"></div>
+        <button class="tool-btn" id="clear-canvas-btn">🗑 Clear</button>
+      </div>
+      <div class="hint-row" id="hint-row"></div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel"><h3>🏆 Scoreboard</h3><ul class="player-list" id="player-list"></ul></div>
+      <div class="panel" style="flex:1;display:flex;flex-direction:column;">
+        <h3>💬 Guess here</h3>
+        <div class="chat-box" id="chat-box"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Type your guess...">
+          <button id="chat-send-btn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ WORD CHOICE OVERLAY ============ -->
+<div class="overlay" id="word-choice-overlay">
+  <h2 id="word-choice-title">Pick a word to draw</h2>
+  <div class="word-choices" id="word-choices"></div>
+  <div class="pass-note" id="word-wait-note" style="display:none;">Waiting for the drawer to pick a word…</div>
+</div>
+
+<!-- ============ ROUND REVEAL OVERLAY ============ -->
+<div class="overlay" id="reveal-overlay">
+  <div class="reveal-card">
+    <h2>The word was: <span id="reveal-word" style="color:var(--red)">apple</span></h2>
+    <ul class="reveal-list" id="reveal-list"></ul>
+    <button class="next-btn" id="next-turn-btn">Next ▶</button>
+  </div>
+</div>
+
+<!-- ============ FINAL RESULTS OVERLAY ============ -->
+<div class="overlay" id="final-overlay">
+  <div class="reveal-card" style="max-width:480px;text-align:center;">
+    <h2>🎉 Game Over!</h2>
+    <div class="podium" id="podium"></div>
+    <ul class="reveal-list" id="final-list"></ul>
+    <button class="next-btn" id="play-again-btn">Back to Lobby</button>
+  </div>
+</div>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<!-- Your Firebase config (fill this in — see SETUP.md) -->
+<script src="firebase-config.js"></script>
+
+<!-- Game logic -->
+<script src="game.js"></script>
+</body>
+</html>
