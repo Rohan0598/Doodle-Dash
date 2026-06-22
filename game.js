@@ -455,6 +455,32 @@ function getPos(e){
   return { x: xRatio * CANVAS_W, y: yRatio * CANVAS_H };
 }
 
+// Stroke batching: instead of pushing one Firebase write per mousemove event
+// (which at 60fps means 60 writes/second — way over Firebase free tier limits,
+// causing observers to see strokes arrive late, out of order, or not at all),
+// we accumulate points locally and flush a polyline segment to Firebase every
+// 50ms. One batch write per 50ms = max ~20 writes/second regardless of mouse
+// speed. Quality is identical since we render locally every frame anyway.
+let pendingStroke = null;  // { color, size, tool, points: [{x,y},...] }
+let strokeFlushTimer = null;
+
+function flushStroke(){
+  if(!pendingStroke || pendingStroke.points.length < 2) { pendingStroke = null; return; }
+  // Convert array of {x,y} into flat interleaved array [x0,y0,x1,y1,...] to
+  // minimise Firebase storage bytes per write.
+  const pts = pendingStroke.points.flatMap(p => [
+    Math.round(p.x/CANVAS_W * 10000)/10000,
+    Math.round(p.y/CANVAS_H * 10000)/10000
+  ]);
+  roomRef.child('strokes').push({
+    pts,
+    color: pendingStroke.color,
+    size: pendingStroke.size,
+    tool: pendingStroke.tool
+  });
+  pendingStroke = null;
+}
+
 function localStroke(p1, p2, color, size, toolType){
   ctx.strokeStyle = toolType === 'eraser' ? '#FFFFFF' : color;
   ctx.lineWidth = toolType === 'eraser' ? size * 3 : size;
@@ -469,22 +495,32 @@ function startDraw(e){
   e.preventDefault();
   drawing = true;
   lastPoint = getPos(e);
+  // Start a fresh stroke batch for this mousedown
+  pendingStroke = { color: brushColor, size: brushSize, tool, points: [lastPoint] };
 }
 function moveDraw(e){
   if(!drawing || !isMyTurnToDraw()) return;
   e.preventDefault();
   const p = getPos(e);
   localStroke(lastPoint, p, brushColor, brushSize, tool);
-  // push to firebase as fractions of the FIXED canvas grid (0-1), so every
-  // device — any screen size, any aspect ratio — replays at the same spot.
-  roomRef.child('strokes').push({
-    x1: lastPoint.x/CANVAS_W, y1: lastPoint.y/CANVAS_H,
-    x2: p.x/CANVAS_W, y2: p.y/CANVAS_H,
-    color: brushColor, size: brushSize, tool: tool
-  });
+  // Accumulate into the current batch
+  if(pendingStroke) pendingStroke.points.push(p);
   lastPoint = p;
+  // Flush on a 50ms throttle
+  if(!strokeFlushTimer){
+    strokeFlushTimer = setTimeout(() => {
+      strokeFlushTimer = null;
+      flushStroke();
+    }, 50);
+  }
 }
-function endDraw(){ drawing = false; }
+function endDraw(){
+  drawing = false;
+  // Flush any remaining points when the mouse/finger lifts
+  clearTimeout(strokeFlushTimer);
+  strokeFlushTimer = null;
+  flushStroke();
+}
 
 canvas.addEventListener('mousedown', startDraw);
 canvas.addEventListener('mousemove', moveDraw);
@@ -494,11 +530,24 @@ canvas.addEventListener('touchmove', moveDraw, {passive:false});
 canvas.addEventListener('touchend', endDraw);
 
 function drawStrokeSegment(s){
-  localStroke(
-    {x: s.x1*CANVAS_W, y: s.y1*CANVAS_H},
-    {x: s.x2*CANVAS_W, y: s.y2*CANVAS_H},
-    s.color, s.size, s.tool
-  );
+  ctx.strokeStyle = s.tool === 'eraser' ? '#FFFFFF' : s.color;
+  ctx.lineWidth = s.tool === 'eraser' ? s.size * 3 : s.size;
+
+  if(s.pts && s.pts.length >= 4){
+    // New batched polyline format: flat [x0,y0,x1,y1,...] normalized 0-1
+    ctx.beginPath();
+    ctx.moveTo(s.pts[0]*CANVAS_W, s.pts[1]*CANVAS_H);
+    for(let i=2; i<s.pts.length; i+=2){
+      ctx.lineTo(s.pts[i]*CANVAS_W, s.pts[i+1]*CANVAS_H);
+    }
+    ctx.stroke();
+  } else if(s.x1 !== undefined){
+    // Legacy segment format (backward-compat for in-progress games)
+    ctx.beginPath();
+    ctx.moveTo(s.x1*CANVAS_W, s.y1*CANVAS_H);
+    ctx.lineTo(s.x2*CANVAS_W, s.y2*CANVAS_H);
+    ctx.stroke();
+  }
 }
 
 function clearCanvasLocal(){
@@ -606,14 +655,21 @@ function renderGameState(prevStatus){
   const drawerId = currentDrawerId();
   const drawerName = (roomState.players[drawerId] || {}).name || '?';
   const amDrawer = drawerId === myPlayerId;
+  const alreadyGuessed = roomState.guesses && roomState.guesses[myPlayerId];
 
   document.getElementById('round-indicator').textContent = `Round ${roomState.round} / ${roomState.settings.rounds}`;
   document.getElementById('drawer-tag').textContent = amDrawer ? "You are drawing!" : `${drawerName} is drawing`;
 
   document.getElementById('toolbar').classList.toggle('disabled', !amDrawer || roomState.status !== 'drawing');
   document.getElementById('canvas-blocked').classList.toggle('show', !amDrawer && roomState.status === 'drawing');
-  document.getElementById('chat-input').disabled = amDrawer && roomState.status === 'drawing';
-  document.getElementById('chat-input').placeholder = (amDrawer && roomState.status==='drawing') ? "You're drawing — can't guess!" : "Type your guess...";
+
+  const chatDisabled = (amDrawer && roomState.status === 'drawing') || !!alreadyGuessed;
+  const chatPlaceholder = amDrawer && roomState.status === 'drawing'
+    ? "You're drawing — can't guess!"
+    : alreadyGuessed ? "You already guessed it! 🎉"
+    : "Type your guess...";
+  document.getElementById('chat-input').disabled = chatDisabled;
+  document.getElementById('chat-input').placeholder = chatPlaceholder;
 
   renderScoreboard();
 
@@ -634,6 +690,7 @@ function renderGameState(prevStatus){
     handleChoosingPhase(amDrawer, drawerName);
   } else {
     document.getElementById('word-choice-overlay').classList.remove('active');
+    document.getElementById('choosing-banner').style.display = 'none';
   }
 
   if(roomState.status === 'drawing'){
@@ -647,12 +704,13 @@ function handleChoosingPhase(amDrawer, drawerName){
   const overlay = document.getElementById('word-choice-overlay');
   const titleEl = document.getElementById('word-choice-title');
   const choicesWrap = document.getElementById('word-choices');
-  const waitNote = document.getElementById('word-wait-note');
+  const banner = document.getElementById('choosing-banner');
 
-  overlay.classList.add('active');
   if(amDrawer){
+    // Drawer: show the full-screen word-choice overlay (only they see it)
+    overlay.classList.add('active');
+    banner.style.display = 'none';
     titleEl.textContent = "Pick a word to draw";
-    waitNote.style.display = 'none';
     choicesWrap.style.display = 'flex';
     choicesWrap.innerHTML = '';
     (roomState.wordOptions || []).forEach(w => {
@@ -671,9 +729,11 @@ function handleChoosingPhase(amDrawer, drawerName){
       choicesWrap.appendChild(btn);
     });
   } else {
-    titleEl.textContent = `${drawerName} is picking a word…`;
-    choicesWrap.style.display = 'none';
-    waitNote.style.display = 'block';
+    // Non-drawers: hide the full overlay, show a slim non-blocking banner
+    // at the top instead so the canvas remains visible.
+    overlay.classList.remove('active');
+    banner.style.display = 'block';
+    banner.textContent = `⏳ ${drawerName} is picking a word…`;
   }
 }
 
@@ -687,12 +747,20 @@ function updateWordBlanksDisplay(amDrawer){
     document.getElementById('hint-row').textContent = 'Only you can see the word';
     return;
   }
+
+  // Already guessed correctly this turn — show the full word
+  const alreadyGuessed = roomState.guesses && roomState.guesses[myPlayerId];
+  if(alreadyGuessed){
+    blanksEl.textContent = word.toUpperCase();
+    document.getElementById('hint-row').textContent = '✅ You guessed it!';
+    return;
+  }
+
   if(roomState.settings.mode === 'hidden'){
     blanksEl.textContent = `(${word.length} letters)`;
     return;
   }
   const revealedHints = roomState.revealedHints || 0;
-  // deterministic pseudo-random reveal based on word + turn key so all guessers see same blanks
   const seed = hashStr(word + (roomState.turnIndex||0));
   const letterIdxs = [...word].map((c,i)=>i).filter(i => word[i] !== ' ');
   const order = seededShuffle(letterIdxs, seed);
@@ -727,7 +795,7 @@ function runLocalTimerIfHost(){
     maybeRevealHintAsHost(left, total);
     if(left <= 0){
       clearInterval(localTimerInterval); localTimerInterval = null;
-      await endTurnAsHost();
+      await endTurnAsHost(roomState.status);
     }
   }, 1000);
 }
@@ -827,6 +895,7 @@ async function scorePendingGuesses(){
 
   guesserIdsSorted.forEach((pid, idx) => {
     if(gains[pid] !== undefined) return; // already scored
+    if(pid === drawerId) return;         // drawer can't be a guesser
     anyNew = true;
     const total = room.turnDuration || room.settings.drawtime;
     const elapsed = Math.floor((Date.now() - room.turnStartedAt)/1000);
@@ -846,10 +915,16 @@ async function scorePendingGuesses(){
     await roomRef.update(updates);
   }
 
+  // Use the nonDrawer count from this fresh snap (not the stale roomState),
+  // and exclude any drawer-id that accidentally ended up in guesses.
   const nonDrawerCount = room.turnOrder.length - 1;
-  const guessedCount = Object.keys(guesses).length;
-  if(guessedCount >= nonDrawerCount){
-    await endTurnAsHost();
+  const validGuessCount = Object.keys(guesses).filter(pid => pid !== drawerId).length;
+  if(validGuessCount >= nonDrawerCount){
+    // Pass the fresh status so endTurnAsHost doesn't race against a stale
+    // roomState.status check — previously roomState could have already been
+    // updated by the .on('value') listener BEFORE endTurnAsHost ran,
+    // causing it to silently bail even though the turn genuinely needed to end.
+    await endTurnAsHost(room.status);
   }
 }
 
@@ -876,9 +951,17 @@ function renderScoreboard(){
 }
 
 /* ---------------------- End turn / round ---------------------- */
-async function endTurnAsHost(){
+async function endTurnAsHost(freshStatus){
   if(!isHost || !roomState) return;
-  if(roomState.status !== 'drawing') return;
+  // Use freshStatus (from the live Firebase snapshot read in scorePendingGuesses)
+  // when available. Fall back to roomState.status for callers like the timer
+  // that don't have a pre-fetched snapshot. This prevents a race where the
+  // .on('value') listener updates roomState AFTER scorePendingGuesses reads
+  // its fresh snap but BEFORE endTurnAsHost checks status — which caused it
+  // to silently bail with "status !== drawing" even though the turn genuinely
+  // needed to end, deadlocking the game for the 3rd (and any subsequent) player.
+  const statusToCheck = freshStatus || roomState.status;
+  if(statusToCheck !== 'drawing') return;
   await roomRef.update({ status: 'reveal' });
 }
 

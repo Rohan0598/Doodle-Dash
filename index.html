@@ -148,6 +148,14 @@
   }
   .canvas-blocked.show{ display:flex; }
 
+  /* Non-blocking "drawer is picking a word" notice for guessers.
+     Replaces the old full-screen overlay that hid the canvas. */
+  .choosing-banner{
+    background:var(--charcoal-2); color:var(--paper);
+    text-align:center; padding:10px 16px; font-size:16px;
+    border-bottom:2px solid var(--teal); letter-spacing:.3px;
+  }
+
   .toolbar{ display:flex; align-items:center; gap:10px; background:var(--charcoal); border-radius:12px; padding:10px 14px; flex-wrap:wrap; }
   .toolbar.disabled{ display:none; }
   .swatches{ display:flex; gap:6px; }
@@ -344,6 +352,8 @@
     <div class="word-blanks" id="word-blanks">_ _ _ _</div>
     <div class="drawer-tag" id="drawer-tag">Alex is drawing</div>
   </div>
+  <!-- Non-drawer "waiting for word pick" notice — small bar, doesn't block canvas -->
+  <div class="choosing-banner" id="choosing-banner" style="display:none;"></div>
 
   <div class="game-body">
     <div class="canvas-col">
@@ -380,7 +390,7 @@
 <div class="overlay" id="word-choice-overlay">
   <h2 id="word-choice-title">Pick a word to draw</h2>
   <div class="word-choices" id="word-choices"></div>
-  <div class="pass-note" id="word-wait-note" style="display:none;">Waiting for the drawer to pick a word…</div>
+  <div class="pass-note" id="word-wait-note" style="display:none;"></div>
 </div>
 
 <!-- ============ ROUND REVEAL OVERLAY ============ -->
