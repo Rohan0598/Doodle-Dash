@@ -142,12 +142,6 @@
     overflow:hidden; position:relative; width:100%; aspect-ratio:16/10;
   }
   #drawCanvas{ display:block; width:100%; height:100%; touch-action:none; cursor:crosshair; }
-  .canvas-blocked{
-    position:absolute; inset:0; background:rgba(255,255,255,0.55); display:none;
-    align-items:center; justify-content:center; font-size:20px; color:var(--charcoal); text-align:center; padding:20px;
-  }
-  .canvas-blocked.show{ display:flex; }
-
   /* Non-blocking "drawer is picking a word" notice for guessers.
      Replaces the old full-screen overlay that hid the canvas. */
   .choosing-banner{
@@ -209,11 +203,20 @@
   .hint-row{ font-size:15px; opacity:.85; margin-top:6px; text-align:center;}
 
   .overlay{
-    position:fixed; inset:0; background:rgba(26,26,46,0.78); display:none; align-items:center; justify-content:center;
-    z-index:50; flex-direction:column; gap:18px; text-align:center; padding:20px;
+    position:fixed; inset:0; background:rgba(26,26,46,0.78); display:none;
+    align-items:center; justify-content:center;
+    z-index:50; flex-direction:column; gap:18px; text-align:center;
+    padding:20px; overflow-y:auto;
   }
   .overlay.active{ display:flex; }
   .overlay h2{ color:white; font-size:28px; margin:0; }
+  .reveal-card{
+    background:var(--paper); border-radius:16px; padding:26px 30px;
+    max-width:420px; width:100%; box-shadow:0 10px 0 rgba(0,0,0,0.3);
+    /* Ensure the card never gets taller than the viewport so Next is always visible */
+    max-height:90vh; overflow-y:auto; flex-shrink:0;
+  }
+  .reveal-card h2{ margin-top:0; font-size:26px; color:var(--ink); }
   .word-choices{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
   .word-choice-btn{
     background:var(--paper); border:3px solid var(--ink); border-radius:12px; padding:16px 26px;
@@ -221,9 +224,6 @@
   }
   .word-choice-btn:hover{ background:var(--yellow); }
   .pass-note{ color:#ccc; font-size:15px; }
-
-  .reveal-card{ background:var(--paper); border-radius:16px; padding:26px 30px; max-width:420px; width:100%; box-shadow:0 10px 0 rgba(0,0,0,0.3); }
-  .reveal-card h2{ margin-top:0; font-size:26px; color:var(--ink); }
   .reveal-list{ list-style:none; padding:0; margin:14px 0 0; }
   .reveal-list li{ display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px dashed var(--line); font-size:18px; }
   .reveal-list li .gain{ color:var(--teal); font-weight:bold; }
@@ -359,7 +359,6 @@
     <div class="canvas-col">
       <div class="canvas-frame">
         <canvas id="drawCanvas" width="900" height="560"></canvas>
-        <div class="canvas-blocked" id="canvas-blocked">✋ Only the drawer can draw right now — guess in the chat!</div>
       </div>
       <div class="toolbar" id="toolbar">
         <div class="swatches" id="swatches"></div>

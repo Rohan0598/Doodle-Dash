@@ -466,12 +466,15 @@ let strokeFlushTimer = null;
 
 function flushStroke(){
   if(!pendingStroke || pendingStroke.points.length < 2) { pendingStroke = null; return; }
-  // Convert array of {x,y} into flat interleaved array [x0,y0,x1,y1,...] to
-  // minimise Firebase storage bytes per write.
-  const pts = pendingStroke.points.flatMap(p => [
+  // Store points as a comma-joined string "x0,y0,x1,y1,..." rather than an
+  // array. Firebase converts JS arrays to keyed objects {"0":v,"1":v,...}
+  // on retrieval, which broke s.pts.length and caused observers to see
+  // nothing (the pts branch never ran, falling through to the legacy format
+  // which also didn't match — so the canvas was never painted for observers).
+  const pts = pendingStroke.points.map(p => [
     Math.round(p.x/CANVAS_W * 10000)/10000,
     Math.round(p.y/CANVAS_H * 10000)/10000
-  ]);
+  ].join(',')).join(';');
   roomRef.child('strokes').push({
     pts,
     color: pendingStroke.color,
@@ -530,19 +533,29 @@ canvas.addEventListener('touchmove', moveDraw, {passive:false});
 canvas.addEventListener('touchend', endDraw);
 
 function drawStrokeSegment(s){
-  ctx.strokeStyle = s.tool === 'eraser' ? '#FFFFFF' : s.color;
-  ctx.lineWidth = s.tool === 'eraser' ? s.size * 3 : s.size;
+  // Always set these — ctx.save()/restore() in clearCanvasLocal resets them
+  // to browser defaults ('butt'/'miter'), which made observer strokes look
+  // thin and disconnected compared to the drawer's smooth round lines.
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = s.tool === 'eraser' ? '#FFFFFF' : (s.color || '#1A1A2E');
+  ctx.lineWidth = s.tool === 'eraser' ? (s.size||6) * 3 : (s.size||6);
 
-  if(s.pts && s.pts.length >= 4){
-    // New batched polyline format: flat [x0,y0,x1,y1,...] normalized 0-1
+  if(typeof s.pts === 'string' && s.pts.length > 0){
+    // New format: "x0,y0;x1,y1;x2,y2;..." where coords are normalised 0-1
+    const pairs = s.pts.split(';').map(pair => {
+      const [x, y] = pair.split(',').map(Number);
+      return { x: x * CANVAS_W, y: y * CANVAS_H };
+    });
+    if(pairs.length < 2) return;
     ctx.beginPath();
-    ctx.moveTo(s.pts[0]*CANVAS_W, s.pts[1]*CANVAS_H);
-    for(let i=2; i<s.pts.length; i+=2){
-      ctx.lineTo(s.pts[i]*CANVAS_W, s.pts[i+1]*CANVAS_H);
+    ctx.moveTo(pairs[0].x, pairs[0].y);
+    for(let i = 1; i < pairs.length; i++){
+      ctx.lineTo(pairs[i].x, pairs[i].y);
     }
     ctx.stroke();
   } else if(s.x1 !== undefined){
-    // Legacy segment format (backward-compat for in-progress games)
+    // Legacy segment format (backward-compat)
     ctx.beginPath();
     ctx.moveTo(s.x1*CANVAS_W, s.y1*CANVAS_H);
     ctx.lineTo(s.x2*CANVAS_W, s.y2*CANVAS_H);
@@ -661,7 +674,6 @@ function renderGameState(prevStatus){
   document.getElementById('drawer-tag').textContent = amDrawer ? "You are drawing!" : `${drawerName} is drawing`;
 
   document.getElementById('toolbar').classList.toggle('disabled', !amDrawer || roomState.status !== 'drawing');
-  document.getElementById('canvas-blocked').classList.toggle('show', !amDrawer && roomState.status === 'drawing');
 
   const chatDisabled = (amDrawer && roomState.status === 'drawing') || !!alreadyGuessed;
   const chatPlaceholder = amDrawer && roomState.status === 'drawing'
