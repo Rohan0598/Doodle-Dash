@@ -213,10 +213,9 @@
   .reveal-card{
     background:var(--paper); border-radius:16px; padding:26px 30px;
     max-width:420px; width:100%; box-shadow:0 10px 0 rgba(0,0,0,0.3);
-    /* Ensure the card never gets taller than the viewport so Next is always visible */
-    max-height:90vh; overflow-y:auto; flex-shrink:0;
+    max-height:88vh; display:flex; flex-direction:column; flex-shrink:0;
   }
-  .reveal-card h2{ margin-top:0; font-size:26px; color:var(--ink); }
+  .reveal-card h2{ margin-top:0; font-size:26px; color:var(--ink); flex-shrink:0; }
   .word-choices{ display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
   .word-choice-btn{
     background:var(--paper); border:3px solid var(--ink); border-radius:12px; padding:16px 26px;
@@ -224,12 +223,16 @@
   }
   .word-choice-btn:hover{ background:var(--yellow); }
   .pass-note{ color:#ccc; font-size:15px; }
-  .reveal-list{ list-style:none; padding:0; margin:14px 0 0; }
+  .reveal-list{
+    list-style:none; padding:0; margin:14px 0 0;
+    overflow-y:auto; flex:1; /* score list scrolls, not the whole card */
+  }
   .reveal-list li{ display:flex; justify-content:space-between; padding:8px 4px; border-bottom:1px dashed var(--line); font-size:18px; }
   .reveal-list li .gain{ color:var(--teal); font-weight:bold; }
   .next-btn{
-    margin-top:18px; width:100%; padding:12px; font-size:20px; background:var(--teal); color:var(--ink); border:none;
+    margin-top:14px; width:100%; padding:14px; font-size:20px; background:var(--teal); color:var(--ink); border:none;
     border-radius:10px; font-family:'Kalam',cursive; font-weight:700; box-shadow:0 5px 0 #2c9b92;
+    flex-shrink:0; /* always visible — never scrolled away */
   }
   .podium{ display:flex; align-items:flex-end; gap:14px; justify-content:center; margin:24px 0; }
   .podium .place{ background:var(--charcoal-2); color:var(--paper); border-radius:10px 10px 0 0; padding:14px 16px; text-align:center; width:110px; }

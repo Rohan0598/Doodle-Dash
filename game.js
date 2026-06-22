@@ -423,20 +423,33 @@ const CANVAS_H = 625; // matches the 16:10 aspect-ratio set in CSS
 function fitCanvas(){
   const ratio = window.devicePixelRatio || 1;
   if(canvas.width !== CANVAS_W * ratio || canvas.height !== CANVAS_H * ratio){
-    // Only happens once (or if devicePixelRatio itself changes, e.g. dragging
-    // a window between a normal and a Retina display) — never on a plain resize.
     canvas.width = CANVAS_W * ratio;
     canvas.height = CANVAS_H * ratio;
-    ctx.setTransform(ratio,0,0,ratio,0,0);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
   }
+  // Always re-apply transform and default stroke settings.
+  // These get wiped whenever canvas.width/height changes AND whenever
+  // ctx.restore() is called (which reverts the full context state).
+  // Setting them here unconditionally means fitCanvas() can be called
+  // as a "reset context state" function, not just a resize handler.
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#1A1A2E';
+  ctx.lineWidth = 6;
+  ctx.fillStyle = '#FFFFFF';
 }
-window.addEventListener('resize', fitCanvas); // safe no-op now unless DPR changed
-window.addEventListener('load', () => setTimeout(fitCanvas, 60));
-setTimeout(fitCanvas, 200);
+
+// Call fitCanvas before first use — NOT deferred via setTimeout.
+// Previously a 200ms setTimeout meant strokes arriving via child_added
+// (which Firebase fires immediately on listener attach for existing data)
+// were drawn BEFORE fitCanvas ran — onto a canvas with no transform
+// and wrong dimensions, producing tiny disconnected grey dashes on
+// observers' screens. Calling fitCanvas() synchronously at script load
+// ensures the canvas is always properly sized before any strokes arrive.
+fitCanvas();
+// Also re-run on resize (DPR changes, window resize) and load
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('load', fitCanvas);
 
 function isMyTurnToDraw(){
   if(!roomState || roomState.status !== 'drawing') return false;
@@ -455,36 +468,18 @@ function getPos(e){
   return { x: xRatio * CANVAS_W, y: yRatio * CANVAS_H };
 }
 
-// Stroke batching: instead of pushing one Firebase write per mousemove event
-// (which at 60fps means 60 writes/second — way over Firebase free tier limits,
-// causing observers to see strokes arrive late, out of order, or not at all),
-// we accumulate points locally and flush a polyline segment to Firebase every
-// 50ms. One batch write per 50ms = max ~20 writes/second regardless of mouse
-// speed. Quality is identical since we render locally every frame anyway.
-let pendingStroke = null;  // { color, size, tool, points: [{x,y},...] }
-let strokeFlushTimer = null;
-
-function flushStroke(){
-  if(!pendingStroke || pendingStroke.points.length < 2) { pendingStroke = null; return; }
-  // Store points as a comma-joined string "x0,y0,x1,y1,..." rather than an
-  // array. Firebase converts JS arrays to keyed objects {"0":v,"1":v,...}
-  // on retrieval, which broke s.pts.length and caused observers to see
-  // nothing (the pts branch never ran, falling through to the legacy format
-  // which also didn't match — so the canvas was never painted for observers).
-  const pts = pendingStroke.points.map(p => [
-    Math.round(p.x/CANVAS_W * 10000)/10000,
-    Math.round(p.y/CANVAS_H * 10000)/10000
-  ].join(',')).join(';');
-  roomRef.child('strokes').push({
-    pts,
-    color: pendingStroke.color,
-    size: pendingStroke.size,
-    tool: pendingStroke.tool
-  });
-  pendingStroke = null;
-}
+// Stroke writing: one Firebase push per segment (one per mousemove/touchmove).
+// We tried batching (accumulating points and flushing every 50ms) to reduce
+// write rate, but the serialization format (string encoding) was adding
+// complexity that made it hard to diagnose observer rendering issues.
+// Per-segment writes are simpler and Firebase Realtime DB handles the rate
+// fine for a drawing game (strokes are small payloads, ~100 bytes each).
+// The coords are normalized 0-1 against CANVAS_W/CANVAS_H so every device
+// renders at the same relative position regardless of screen size.
 
 function localStroke(p1, p2, color, size, toolType){
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   ctx.strokeStyle = toolType === 'eraser' ? '#FFFFFF' : color;
   ctx.lineWidth = toolType === 'eraser' ? size * 3 : size;
   ctx.beginPath();
@@ -498,32 +493,24 @@ function startDraw(e){
   e.preventDefault();
   drawing = true;
   lastPoint = getPos(e);
-  // Start a fresh stroke batch for this mousedown
-  pendingStroke = { color: brushColor, size: brushSize, tool, points: [lastPoint] };
 }
 function moveDraw(e){
   if(!drawing || !isMyTurnToDraw()) return;
   e.preventDefault();
   const p = getPos(e);
   localStroke(lastPoint, p, brushColor, brushSize, tool);
-  // Accumulate into the current batch
-  if(pendingStroke) pendingStroke.points.push(p);
+  roomRef.child('strokes').push({
+    x1: lastPoint.x/CANVAS_W,
+    y1: lastPoint.y/CANVAS_H,
+    x2: p.x/CANVAS_W,
+    y2: p.y/CANVAS_H,
+    c: brushColor,
+    s: brushSize,
+    t: tool
+  });
   lastPoint = p;
-  // Flush on a 50ms throttle
-  if(!strokeFlushTimer){
-    strokeFlushTimer = setTimeout(() => {
-      strokeFlushTimer = null;
-      flushStroke();
-    }, 50);
-  }
 }
-function endDraw(){
-  drawing = false;
-  // Flush any remaining points when the mouse/finger lifts
-  clearTimeout(strokeFlushTimer);
-  strokeFlushTimer = null;
-  flushStroke();
-}
+function endDraw(){ drawing = false; }
 
 canvas.addEventListener('mousedown', startDraw);
 canvas.addEventListener('mousemove', moveDraw);
@@ -533,42 +520,33 @@ canvas.addEventListener('touchmove', moveDraw, {passive:false});
 canvas.addEventListener('touchend', endDraw);
 
 function drawStrokeSegment(s){
-  // Always set these — ctx.save()/restore() in clearCanvasLocal resets them
-  // to browser defaults ('butt'/'miter'), which made observer strokes look
-  // thin and disconnected compared to the drawer's smooth round lines.
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = s.tool === 'eraser' ? '#FFFFFF' : (s.color || '#1A1A2E');
-  ctx.lineWidth = s.tool === 'eraser' ? (s.size||6) * 3 : (s.size||6);
-
-  if(typeof s.pts === 'string' && s.pts.length > 0){
-    // New format: "x0,y0;x1,y1;x2,y2;..." where coords are normalised 0-1
-    const pairs = s.pts.split(';').map(pair => {
-      const [x, y] = pair.split(',').map(Number);
-      return { x: x * CANVAS_W, y: y * CANVAS_H };
-    });
-    if(pairs.length < 2) return;
-    ctx.beginPath();
-    ctx.moveTo(pairs[0].x, pairs[0].y);
-    for(let i = 1; i < pairs.length; i++){
-      ctx.lineTo(pairs[i].x, pairs[i].y);
-    }
-    ctx.stroke();
-  } else if(s.x1 !== undefined){
-    // Legacy segment format (backward-compat)
-    ctx.beginPath();
-    ctx.moveTo(s.x1*CANVAS_W, s.y1*CANVAS_H);
-    ctx.lineTo(s.x2*CANVAS_W, s.y2*CANVAS_H);
-    ctx.stroke();
-  }
+  // Support both short keys (c/s/t) and legacy long keys (color/size/tool)
+  const color = s.c || s.color || '#1A1A2E';
+  const size  = s.s || s.size  || 6;
+  const tool  = s.t || s.tool  || 'pen';
+  ctx.strokeStyle = tool === 'eraser' ? '#FFFFFF' : color;
+  ctx.lineWidth   = tool === 'eraser' ? size * 3 : size;
+  ctx.beginPath();
+  ctx.moveTo(s.x1 * CANVAS_W, s.y1 * CANVAS_H);
+  ctx.lineTo(s.x2 * CANVAS_W, s.y2 * CANVAS_H);
+  ctx.stroke();
 }
 
 function clearCanvasLocal(){
-  ctx.save();
-  ctx.setTransform(window.devicePixelRatio||1,0,0,window.devicePixelRatio||1,0,0);
+  // Do NOT use ctx.save()/ctx.restore() here — restore() resets the entire
+  // canvas context state including lineCap, lineJoin, strokeStyle, lineWidth,
+  // back to browser defaults ('butt', 'miter', 'black', 1). After a clear,
+  // the next stroke would look thin and harsh until drawStrokeSegment
+  // explicitly reset them. Instead, just fill the rect and then re-call
+  // fitCanvas() to ensure all context settings are correct.
+  const ratio = window.devicePixelRatio || 1;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
-  ctx.restore();
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 }
 
 document.getElementById('clear-canvas-btn').addEventListener('click', () => {
