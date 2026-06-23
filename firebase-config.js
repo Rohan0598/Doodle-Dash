@@ -16,3 +16,10 @@ const firebaseConfig = {
 // Don't edit below this line
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+const auth = firebase.auth();
+
+// Sign in anonymously — gives every browser tab a random uid automatically.
+// No email/password, no user-facing prompt. We use this uid in Firebase
+// Security Rules to verify who is the host vs a regular player, without
+// leaving the database wide open to the public internet.
+auth.signInAnonymously().catch(e => console.warn('Auth failed:', e.message));

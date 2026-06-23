@@ -64,6 +64,29 @@ function initConnectionWatcher(){
     document.getElementById('conn-dot').className = 'dot ' + (ok ? 'ok' : '');
     document.getElementById('conn-text').textContent = ok ? 'Connected' : 'Connecting to server…';
   });
+  auth.onAuthStateChanged(user => {
+    if(!user){
+      document.getElementById('conn-dot').className = 'dot';
+      document.getElementById('conn-text').textContent = 'Signing in…';
+    }
+  });
+}
+
+/* ---------------------- Auth helper ---------------------- */
+// Returns the current Firebase auth uid, waiting for sign-in if needed.
+// auth.signInAnonymously() is called in firebase-config.js at load time,
+// so this is usually instant (uid is already available by the time the
+// user clicks Create/Join). The await just handles the rare edge case where
+// the network sign-in hasn't completed yet.
+async function getAuthUid(){
+  if(auth.currentUser) return auth.currentUser.uid;
+  return new Promise((resolve, reject) => {
+    const unsub = auth.onAuthStateChanged(user => {
+      unsub();
+      if(user) resolve(user.uid);
+      else reject(new Error('Not signed in'));
+    });
+  });
 }
 
 /* ---------------------- Landing screen ---------------------- */
@@ -77,6 +100,10 @@ document.getElementById('create-room-btn').addEventListener('click', async () =>
   if(!myName){ showError('Enter your name first'); return; }
   if(typeof db === 'undefined'){ showError('Firebase is not configured yet — see SETUP.md'); return; }
 
+  let authUid;
+  try { authUid = await getAuthUid(); }
+  catch(e){ showError('Authentication failed — check your internet connection'); return; }
+
   const code = roomCodeGen();
   myRoomCode = code;
   isHost = true;
@@ -86,8 +113,9 @@ document.getElementById('create-room-btn').addEventListener('click', async () =>
     drawtime: 80, rounds: 3, mode: 'normal', wordcount: 3, hints: 2, bank: 'general'
   };
 
+  // hostId is the Firebase auth uid — security rules verify writes against this
   await roomRef.set({
-    hostId: myPlayerId,
+    hostId: authUid,
     status: 'lobby',
     createdAt: Date.now(),
     settings: initialSettings,
@@ -117,7 +145,7 @@ document.getElementById('join-room-btn').addEventListener('click', async () => {
   if(data.status !== 'lobby'){ showError('That game already started.'); return; }
 
   myRoomCode = code;
-  isHost = (data.hostId === myPlayerId);
+  isHost = !!(auth.currentUser && data.hostId === auth.currentUser.uid);
   roomRef = ref;
 
   const existingCount = data.players ? Object.keys(data.players).length : 0;
@@ -176,7 +204,7 @@ async function attemptRejoin(remembered){
       isHost = remembered.isHost === true;
       roomRef = db.ref('rooms/' + myRoomCode);
       const hostSnap = await roomRef.child('hostId').once('value');
-      isHost = hostSnap.val() === myPlayerId;
+      isHost = !!(auth.currentUser && hostSnap.val() === auth.currentUser.uid);
       enterLobby();
       return true;
     }
